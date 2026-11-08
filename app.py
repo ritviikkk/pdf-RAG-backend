@@ -195,6 +195,17 @@ def cleanup_old(db):
 def health():
     return {"status": "ok"}
 
+@app.get("/debug")
+def debug():
+    import resource
+    return {
+        "embed_provider": EMBED_PROVIDER,
+        "has_gemini_key": bool(GEMINI_API_KEY),
+        "has_groq_key": bool(GROQ_API_KEY),
+        "chroma_cloud": bool(os.environ.get("CHROMA_API_KEY")),
+        "memory_mb": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024,
+    }
+
 
 @app.post("/upload")
 def upload(request: Request, file: UploadFile = File(...)):
