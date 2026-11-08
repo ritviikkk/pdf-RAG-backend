@@ -19,7 +19,7 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "openai/gpt-oss-120b")
 EMBED_MODEL = "gemini-embedding-001"
 EMBED_DIM = 768
 EMBED_PROVIDER = os.environ.get("EMBED_PROVIDER", "local")  # "local" ya "gemini"
-MAX_MB, MAX_CHUNKS, DOC_TTL_HOURS = 10, 1500, 24
+MAX_MB, MAX_CHUNKS, DOC_TTL_HOURS = 10, 300, 24
 ALLOWED_ORIGINS = os.environ.get("ALLOWED_ORIGINS", "*").split(",")
 
 # ---------- PostgreSQL ----------
@@ -97,37 +97,62 @@ def rate_limit(request: Request, name: str, limit: int, per: int = 60):
 _local_ef = None
 
 def embed(texts, task):
-    global _local_ef
-    if EMBED_PROVIDER == "local":
-        if _local_ef is None:
-            from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
-            _local_ef = DefaultEmbeddingFunction()
-        return [[float(x) for x in v] for v in _local_ef(texts)]
-    # --- yahan se neeche tera purana Gemini wala code waisa hi rahega ---
     if not GEMINI_API_KEY:
-   
         raise HTTPException(500, "GEMINI_API_KEY set nahi hai")
     out = []
-    for i in range(0, len(texts), 100):
-        batch = texts[i:i + 100]
+    for i in range(0, len(texts), 20):
+        batch = texts[i:i + 20]
         body = {"requests": [{
             "model": f"models/{EMBED_MODEL}",
             "content": {"parts": [{"text": t}]},
             "taskType": task,
             "outputDimensionality": EMBED_DIM,
         } for t in batch]}
-        for attempt in range(3):
-            
+        for attempt in range(4):
             r = requests.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{EMBED_MODEL}:batchEmbedContents",
                 headers={"x-goog-api-key": GEMINI_API_KEY}, json=body, timeout=60)
-            if r.status_code == 429 and attempt < 2:
-                time.sleep(5 * (attempt + 1)); continue
+            if r.status_code == 429 and attempt < 3:
+                time.sleep(20); continue
             break
         if r.status_code != 200:
             raise HTTPException(502, f"Embedding error: {r.text[:200]}")
         out += [e["values"] for e in r.json()["embeddings"]]
+        time.sleep(1.5)
     return out
+
+# def embed(texts, task):
+#     global _local_ef
+#     if EMBED_PROVIDER == "local":
+#         if _local_ef is None:
+#             from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+#             _local_ef = DefaultEmbeddingFunction()
+#         return [[float(x) for x in v] for v in _local_ef(texts)]
+#     # --- yahan se neeche tera purana Gemini wala code waisa hi rahega ---
+#     if not GEMINI_API_KEY:
+   
+#         raise HTTPException(500, "GEMINI_API_KEY set nahi hai")
+#     out = []
+#     for i in range(0, len(texts), 100):
+#         batch = texts[i:i + 100]
+#         body = {"requests": [{
+#             "model": f"models/{EMBED_MODEL}",
+#             "content": {"parts": [{"text": t}]},
+#             "taskType": task,
+#             "outputDimensionality": EMBED_DIM,
+#         } for t in batch]}
+#         for attempt in range(3):
+            
+#             r = requests.post(
+#                 f"https://generativelanguage.googleapis.com/v1beta/models/{EMBED_MODEL}:batchEmbedContents",
+#                 headers={"x-goog-api-key": GEMINI_API_KEY}, json=body, timeout=60)
+#             if r.status_code == 429 and attempt < 2:
+#                 time.sleep(5 * (attempt + 1)); continue
+#             break
+#         if r.status_code != 200:
+#             raise HTTPException(502, f"Embedding error: {r.text[:200]}")
+#         out += [e["values"] for e in r.json()["embeddings"]]
+#     return out
 
 
 def chunk_pages(doc, size=200, overlap=40):
